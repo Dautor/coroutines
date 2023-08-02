@@ -22,6 +22,34 @@ struct client
 static dlist  Clients;
 static size_t NextClientID;
 
+static void Broadcast(size_t ID, char const *Message, size_t MessageLength);
+
+static client *
+ClientAlloc(fd I, fd O)
+{
+	auto C = (client *)calloc(1, sizeof(client));
+	C->ID  = NextClientID++;
+	C->I   = I;
+	C->O   = O;
+	insert_last(&Clients, &C->List);
+	static char const *const Message       = "connected!\n";
+	static size_t const      MessageLength = __builtin_strlen(Message);
+	Broadcast(C->ID, Message, MessageLength);
+	return C;
+}
+
+static void
+Free(client *C)
+{
+	static char const *const Message       = "disconnected!\n";
+	static size_t const      MessageLength = __builtin_strlen(Message);
+	Broadcast(C->ID, Message, MessageLength);
+	close(C->I);
+	close(C->O);
+	remove(&C->List);
+	free(C);
+}
+
 static void
 Broadcast(size_t ID, char const *Message, size_t MessageLength)
 {
@@ -39,29 +67,6 @@ Broadcast(size_t ID, char const *Message, size_t MessageLength)
 		write(I->O, StringID, (size_t)Length);
 		write(I->O, Message, MessageLength);
 	}
-}
-
-static void
-Free(client *C)
-{
-	char const *const Message       = "disconnected!\n";
-	size_t const      MessageLength = __builtin_strlen(Message);
-	Broadcast(C->ID, Message, MessageLength);
-	close(C->I);
-	close(C->O);
-	remove(&C->List);
-	free(C);
-}
-
-static client *
-ClientAlloc(fd I, fd O)
-{
-	auto C = (client *)calloc(1, sizeof(client));
-	C->ID  = NextClientID++;
-	C->I   = I;
-	C->O   = O;
-	insert_last(&Clients, &C->List);
-	return C;
 }
 
 static void
@@ -90,9 +95,8 @@ HandleClient(client *C)
 static void
 HandleServer(fd FD)
 {
-	auto STDIO = ClientAlloc(STDIN_FILENO, STDOUT_FILENO);
-	CO(HandleClient(STDIO));
 	printf("Starting server [%d]!\n", FD);
+	CO(HandleClient(ClientAlloc(STDIN_FILENO, STDOUT_FILENO)));
 	while(true)
 	{
 		sockaddr_storage Address;
@@ -105,11 +109,7 @@ HandleServer(fd FD)
 			perror("accept");
 			return;
 		}
-		auto C = ClientAlloc(ClientFD, ClientFD);
-		CO(HandleClient(C));
-		char const *const Message       = "connected!\n";
-		size_t const      MessageLength = __builtin_strlen(Message);
-		Broadcast(C->ID, Message, MessageLength);
+		CO(HandleClient(ClientAlloc(ClientFD, ClientFD)));
 	}
 }
 

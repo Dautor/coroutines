@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <netdb.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,6 +46,7 @@ HandleReadFD(fd FD)
 int
 main()
 {
+	signal(SIGPIPE, SIG_IGN);
 	addrinfo Hints = {
 		.ai_family   = AF_UNSPEC,
 		.ai_socktype = SOCK_STREAM,
