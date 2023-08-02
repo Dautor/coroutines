@@ -16,9 +16,9 @@ static void
 bar(char const *X)
 {
 	printf("\tbar 0 %s\n", X);
+	CO(baz(X));
 	co::yield();
 	printf("\tbar 1 %s\n", X);
-	CO(baz(X));
 }
 
 static void
@@ -35,6 +35,12 @@ main()
 {
 	CO(foo("A"));
 	CO(foo("B"));
+	CO({
+		printf("Example\n");
+		co::yield();
+		co::yield();
+		printf("Example done\n");
+	});
 	CO(bar("C"));
 	CO(baz("D"));
 	co::execute();
