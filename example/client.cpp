@@ -6,6 +6,7 @@
 #include <string.h>
 #include <sysexits.h>
 #include <unistd.h>
+#include <sys/socket.h>
 
 #include "../src/co.hpp"
 

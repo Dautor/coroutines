@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sysexits.h>
+#include <unistd.h>
+#include <sys/socket.h>
 
 #include "../src/co.hpp"
 #include "../src/dlist.hpp"
