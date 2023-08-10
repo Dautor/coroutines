@@ -86,6 +86,8 @@ LambdaProc(routine *Co)
 {
 	Co->F();
 	Free(Co);
+	static thread_local ucontext_t _;
+	swapcontext(&_, &E->Context);
 }
 
 static void
@@ -173,11 +175,10 @@ co::add(std::function<void()> F, size_t StackSize)
 {
 	if(E == nullptr) enable();
 	auto Co = RoutineAlloc(StackSize);
-	Co->F   = F;
+	Co->F   = std::move(F);
 	if(getcontext(&Co->Context) == -1) assert(0);
 	Co->Context.uc_stack.ss_sp   = Co->Stack;
 	Co->Context.uc_stack.ss_size = StackSize;
-	Co->Context.uc_link          = &E->Context;
 	makecontext(&Co->Context, (void (*)())LambdaProc, 1, Co);
 }
 

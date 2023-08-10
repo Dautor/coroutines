@@ -1,0 +1,22 @@
+
+* Examples
+Examples can be found under directory =example=.
+
+Currently there are 3 example programs:
+- yield
+
+  Shows some computation within coroutines and uses =yield= to make them concurent.
+- server
+
+  Implementation of a simple TCP server using this coroutine library.
+  - supports an "infinite" amount of clients.
+  - just broadcasts messages to all clients
+- client
+
+  Implementation of a simple TCP client using this coroutine library.
+  - can connect to the example server and send/receive messages
+
+* Why C++?
+Unfortunately, this library is not implementable in C.
+It is _almost_ implementable, except for the simple syntax of =CO=.
+It would be implementable if we had =vmakecontext= (a variant of =makecontext= that takes in =va_list= instead of =...=). If someone provides it, I will port the library to C.
