@@ -6,7 +6,7 @@ namespace co
 {
 	std::size_t const constexpr DefaultStackSize = 32lu * 1024lu;
 
-	void execute(); // do NOT call this while in a cubroutine
+	void execute(); // do NOT call this while in a coroutine
 
 	// use this one anywhere
 	void add(std::function<void()>, std::size_t StackSize = DefaultStackSize);
