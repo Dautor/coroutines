@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <time.h>
 
 namespace co
 {
@@ -13,7 +14,13 @@ namespace co
 #define CO(f, ...) ::co::add([=]() { f; } __VA_OPT__(, __VA_ARGS__))
 
 	// use these only in a coroutine
-	void yield();
-	void wait_read(int fd);
-	void wait_write(int fd);
+	typedef void notification;
+
+	notification *yield();
+	notification *wait_read(int fd);
+	notification *wait_write(int fd);
+	notification *sleep(timespec const *);
+
+	void notify_all(notification *);
+	void clear();
 };

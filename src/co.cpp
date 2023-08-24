@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sysexits.h>
 #include <ucontext.h>
 #include <unistd.h>
 
@@ -12,6 +13,7 @@
 #	include <sys/event.h>
 #elif defined __linux__
 #	include <sys/epoll.h>
+#	include <sys/timerfd.h>
 #else
 #	error unsupported OS
 #endif
@@ -23,6 +25,7 @@ struct routine
 {
 	dlist                 List;
 	ucontext_t            Context;
+	co::notification     *Notification;
 	std::function<void()> F;
 	uint8_t               Stack[0];
 };
@@ -54,10 +57,11 @@ Free(routine *R)
 	free(R);
 }
 
-void
+co::notification *
 co::yield()
 {
 	if(swapcontext(&E->ExecutingAt->Context, &E->Context) == -1) assert(0);
+	return E->ExecutingAt->Notification;
 }
 
 static void
@@ -217,9 +221,10 @@ wait(fd FD, uint32_t Events)
 #	error unsupported OS
 #endif
 
-void
+co::notification *
 co::wait_read(fd FD)
 {
+	if(E->ExecutingAt->Notification != nullptr) return E->ExecutingAt->Notification;
 #if defined __FreeBSD__
 	wait(FD, EVFILT_READ);
 #elif defined __linux__
@@ -227,11 +232,13 @@ co::wait_read(fd FD)
 #else
 #	error unsupported OS
 #endif
+	return E->ExecutingAt->Notification;
 }
 
-void
+co::notification *
 co::wait_write(fd FD)
 {
+	if(E->ExecutingAt->Notification != nullptr) return E->ExecutingAt->Notification;
 #if defined __FreeBSD__
 	wait(FD, EVFILT_WRITE);
 #elif defined __linux__
@@ -239,4 +246,52 @@ co::wait_write(fd FD)
 #else
 #	error unsupported OS
 #endif
+	return E->ExecutingAt->Notification;
+}
+
+co::notification *
+co::sleep(timespec const *T)
+{
+	if(E->ExecutingAt->Notification != nullptr) return E->ExecutingAt->Notification;
+#if defined __FreeBSD__
+#	error TODO: Use EVFILT_TIMER here
+#elif defined __linux__
+	fd FD = timerfd_create(CLOCK_MONOTONIC, 0);
+	if(FD == -1) exit(EX_OSERR);
+	itimerspec IT;
+	IT.it_value = *T;
+	IT.it_interval = {};
+	int Result = timerfd_settime(FD, 0, &IT, nullptr);
+	if(Result == -1) exit(EX_OSERR);
+	wait(FD, EPOLLIN);
+	close(FD);
+#else
+#	error unsupported OS
+#endif
+	return E->ExecutingAt->Notification;
+}
+
+void
+co::notify_all(notification *N)
+{
+	for(auto I = E->Waiting.Next; I != &E->Waiting; I = I->Next)
+	{
+		auto Co          = ContainerOf(I, routine, List);
+		Co->Notification = N;
+	}
+	dlist *Next;
+	for(auto I = E->Waiting.Next; I != &E->Waiting; I = Next)
+	{
+		Next             = I->Next;
+		auto Co          = ContainerOf(I, routine, List);
+		Co->Notification = N;
+		remove(&Co->List);
+		insert_first(&E->Executing, &Co->List);
+	}
+}
+
+void
+co::clear()
+{
+	E->ExecutingAt->Notification = nullptr;
 }

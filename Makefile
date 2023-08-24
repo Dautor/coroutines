@@ -7,7 +7,7 @@ CXX = clang++
 LDFLAGS ?= ${SANITIZE}
 CXXFLAGS ?=  -MMD -g ${SANITIZE} -Wall -Wextra -pedantic -Weverything -Werror ${WARNINGS_IGNORE}
 
-all: bin/yield bin/server bin/client
+all: bin/yield bin/server bin/client bin/notification
 clean:
 	-rm bin/* example/*.o example/*.d src/*.o src/*.d  2>/dev/null
 
@@ -16,6 +16,8 @@ bin/yield: example/yield.o src/co.o
 bin/server: example/server.o src/co.o
 	${CXX} ${LDFLAGS} -o $@ $^
 bin/client: example/client.o src/co.o
+	${CXX} ${LDFLAGS} -o $@ $^
+bin/notification: example/notification.o src/co.o
 	${CXX} ${LDFLAGS} -o $@ $^
 
 -include example/*.d
