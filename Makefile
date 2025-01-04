@@ -1,7 +1,7 @@
 .PHONY: all clean
 
 SANITIZE ?= -fsanitize=undefined,integer,nullability,memory
-WARNINGS_IGNORE = -Wno-c++98-compat-extra-semi -Wno-old-style-cast -Wno-c++98-compat -Wno-zero-length-array -Wno-c++20-designator -Wno-invalid-offsetof -Wno-c++98-compat-pedantic -Wno-gnu-zero-variadic-macro-arguments
+WARNINGS_IGNORE = -Wno-c++98-compat-extra-semi -Wno-old-style-cast -Wno-c++98-compat -Wno-zero-length-array -Wno-c++20-designator -Wno-invalid-offsetof -Wno-c++98-compat-pedantic -Wno-gnu-zero-variadic-macro-arguments -Wno-unsafe-buffer-usage -Wno-cast-function-type-strict -Wno-missing-field-initializers
 
 CXX = clang++
 LDFLAGS ?= ${SANITIZE}
