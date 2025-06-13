@@ -209,7 +209,7 @@ co::execute()
 #endif
 		} else
 		{
-			break;
+			if(empty(&E->Executing)) break;
 		}
 	}
 	pthread_mutex_unlock(E->Mutex);
