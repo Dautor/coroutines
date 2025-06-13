@@ -11,7 +11,9 @@ namespace co
 
 	// use this one anywhere
 	void add(std::function<void()>, std::size_t StackSize = DefaultStackSize);
-#define CO(f, ...) ::co::add([=]() { f; } __VA_OPT__(, __VA_ARGS__))
+
+#define CO(f)             ::co::add([=]() { f; })
+#define CO1(f, StackSize) ::co::add([=]() { f; }, StackSize)
 
 	void free();
 

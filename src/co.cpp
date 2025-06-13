@@ -6,6 +6,7 @@
 #include <ucontext.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <sys/timerfd.h>
 
 #include "co.hpp"
 #include "dlist.hpp"
@@ -14,7 +15,6 @@
 #	include <sys/event.h>
 #elif defined __linux__
 #	include <sys/epoll.h>
-#	include <sys/timerfd.h>
 #else
 #	error unsupported OS
 #endif
@@ -22,6 +22,10 @@
 #define ArrayCount(x) (sizeof(x) / sizeof(*(x)))
 typedef int fd;
 
+#pragma clang diagnostic ignored "-Wthread-safety-negative"
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wpadded"
 struct routine
 {
 	dlist                 List;
@@ -30,6 +34,7 @@ struct routine
 	std::function<void()> F;
 	uint8_t               Stack[0];
 };
+#pragma clang diagnostic pop
 
 struct engine
 {
@@ -71,27 +76,29 @@ co::yield()
 }
 
 static void
-Free(engine *E)
+Free(engine *Engine)
 {
-	pthread_mutex_lock(E->Mutex);
+	pthread_mutex_lock(&Mutex);
+	auto M = Engine->Mutex;
+	pthread_mutex_lock(M);
 	dlist *Next;
-	for(auto I = E->Executing.Next; I != &E->Executing; I = Next)
+	for(auto I = Engine->Executing.Next; I != &Engine->Executing; I = Next)
 	{
 		Next = I->Next;
 		Free(ContainerOf(I, routine, List));
 	}
-	for(auto I = E->Waiting.Next; I != &E->Waiting; I = Next)
+	for(auto I = Engine->Waiting.Next; I != &Engine->Waiting; I = Next)
 	{
 		Next = I->Next;
 		Free(ContainerOf(I, routine, List));
 	}
-	close(E->FD);
-	remove(&E->List);
-	*E->Global = nullptr;
-	auto M     = E->Mutex;
-	free(E);
+	close(Engine->FD);
+	remove(&Engine->List);
+	*Engine->Global = nullptr;
+	free(Engine);
 	pthread_mutex_unlock(M);
 	free(M);
+	pthread_mutex_unlock(&Mutex);
 }
 
 void
@@ -159,10 +166,11 @@ co::execute()
 		{
 			bool OnlyWaiting = empty(&E->Executing);
 #if defined __FreeBSD__
-			struct kevent Events[16];
-			int           EventCount;
-#	warning "fix timeout when only waiting"
-			while((EventCount = kevent(E->FD, nullptr, 0, Events, ArrayCount(Events), nullptr)) == -1)
+			struct kevent         Events[16];
+			int                   EventCount;
+			static timespec const T       = { .tv_sec = 0, .tv_nsec = 0 };
+			auto                  Timeout = OnlyWaiting ? nullptr : &T;
+			while((EventCount = kevent(E->FD, nullptr, 0, Events, ArrayCount(Events), Timeout)) == -1)
 			{
 				if(errno != EINTR)
 				{
@@ -174,7 +182,6 @@ co::execute()
 			{
 				auto Event = Events + EventIndex;
 				auto Co    = (routine *)Event->udata;
-				printf("USING=%p\n", (void *)Co);
 				remove(&Co->List);
 				insert_first(&E->Executing, &Co->List);
 			}
@@ -224,17 +231,24 @@ co::add(std::function<void()> F, size_t StackSize)
 static void
 wait(fd FD, short Events)
 {
-	assert(E->ExecutingAt);
 	auto Co = E->ExecutingAt;
-	printf("SAVING=%p\n", (void *)Co);
+	assert(Co != nullptr);
 	struct kevent Event;
 	EV_SET(&Event, FD, Events, EV_ADD, 0, 0, Co);
-	kevent(E->FD, &Event, 1, nullptr, 0, nullptr);
+	if(kevent(E->FD, &Event, 1, nullptr, 0, nullptr) == -1)
+	{
+		perror("kevent");
+		assert(0);
+	}
 	remove(&Co->List);
 	insert_last(&E->Waiting, &Co->List);
 	if(swapcontext(&Co->Context, &E->Context) == -1) assert(0);
 	EV_SET(&Event, FD, Events, EV_DELETE, 0, 0, Co);
-	kevent(E->FD, &Event, 1, nullptr, 0, nullptr);
+	if(kevent(E->FD, &Event, 1, nullptr, 0, nullptr) == -1)
+	{
+		perror("kevent");
+		assert(0);
+	}
 }
 #elif defined __linux__
 static void
@@ -287,21 +301,23 @@ co::notification *
 co::sleep(timespec const *T)
 {
 	if(E->ExecutingAt->Notification != nullptr) return E->ExecutingAt->Notification;
-#if defined __FreeBSD__
-#	error TODO: Use EVFILT_TIMER here
-#elif defined __linux__
 	fd FD = timerfd_create(CLOCK_MONOTONIC, 0);
-	if(FD == -1) exit(EX_OSERR);
+	if(FD == -1)
+	{
+		perror("timerfd_create");
+		exit(EX_OSERR);
+	}
 	itimerspec IT;
 	IT.it_value    = *T;
 	IT.it_interval = {};
 	int Result     = timerfd_settime(FD, 0, &IT, nullptr);
-	if(Result == -1) exit(EX_OSERR);
-	wait(FD, EPOLLIN);
+	if(Result == -1)
+	{
+		perror("timerfd_settime");
+		exit(EX_OSERR);
+	}
+	wait_read(FD);
 	close(FD);
-#else
-#	error unsupported OS
-#endif
 	return E->ExecutingAt->Notification;
 }
 
