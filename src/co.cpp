@@ -5,6 +5,7 @@
 #include <sysexits.h>
 #include <ucontext.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #include "co.hpp"
 #include "dlist.hpp"
@@ -32,15 +33,20 @@ struct routine
 
 struct engine
 {
-	fd         FD;
-	uint8_t    Padding0[sizeof(void *) - sizeof(fd)];
-	routine   *ExecutingAt;
-	ucontext_t Context;
-	dlist      Executing;
-	dlist      Waiting;
+	dlist            List;
+	engine         **Global;
+	pthread_mutex_t *Mutex;
+	fd               FD;
+	uint8_t          Padding0[sizeof(void *) - sizeof(fd)];
+	routine         *ExecutingAt;
+	ucontext_t       Context;
+	dlist            Executing;
+	dlist            Waiting;
 };
 
 static thread_local engine *E;
+static pthread_mutex_t      Mutex = PTHREAD_MUTEX_INITIALIZER;
+static dlist                EngineList; // protected by Mutex
 
 static routine *
 RoutineAlloc(size_t StackSize)
@@ -65,24 +71,40 @@ co::yield()
 }
 
 static void
-Free()
+Free(engine *E)
 {
+	pthread_mutex_lock(E->Mutex);
 	dlist *Next;
 	for(auto I = E->Executing.Next; I != &E->Executing; I = Next)
 	{
-		Next   = I->Next;
-		auto _ = ContainerOf(I, routine, List);
-		Free(_);
+		Next = I->Next;
+		Free(ContainerOf(I, routine, List));
 	}
 	for(auto I = E->Waiting.Next; I != &E->Waiting; I = Next)
 	{
-		Next   = I->Next;
-		auto _ = ContainerOf(I, routine, List);
-		Free(_);
+		Next = I->Next;
+		Free(ContainerOf(I, routine, List));
 	}
 	close(E->FD);
+	remove(&E->List);
+	*E->Global = nullptr;
+	auto M     = E->Mutex;
 	free(E);
-	E = nullptr;
+	pthread_mutex_unlock(M);
+	free(M);
+}
+
+void
+co::free()
+{
+	pthread_mutex_lock(&Mutex);
+	dlist *Next;
+	for(auto I = EngineList.Next; I != &EngineList; I = Next)
+	{
+		Next = I->Next;
+		Free(ContainerOf(I, engine, List));
+	}
+	pthread_mutex_unlock(&Mutex);
 }
 
 static void
@@ -97,6 +119,8 @@ LambdaProc(routine *Co)
 static void
 enable()
 {
+	pthread_mutex_lock(&Mutex);
+	if(EngineList.Next == nullptr) init(&EngineList);
 	E = (engine *)calloc(1, sizeof(engine));
 #if defined __FreeBSD__
 	E->FD = kqueue();
@@ -107,12 +131,17 @@ enable()
 #endif
 	init(&E->Executing);
 	init(&E->Waiting);
-	atexit(Free);
+	E->Global = &E;
+	E->Mutex  = (pthread_mutex_t *)malloc(sizeof(pthread_mutex_t));
+	*E->Mutex = PTHREAD_MUTEX_INITIALIZER;
+	insert_first(&EngineList, &E->List);
+	pthread_mutex_unlock(&Mutex);
 }
 
 void
 co::execute()
 {
+	pthread_mutex_lock(E->Mutex);
 	while(true)
 	{
 		if(empty(&E->Executing) == false)
@@ -125,11 +154,14 @@ co::execute()
 				E->ExecutingAt = Co;
 				if(swapcontext(&E->Context, &Co->Context) == -1) assert(0);
 			}
-		} else if(empty(&E->Waiting) == false)
+		}
+		if(empty(&E->Waiting) == false)
 		{
+			bool OnlyWaiting = empty(&E->Executing);
 #if defined __FreeBSD__
 			struct kevent Events[16];
 			int           EventCount;
+#	warning "fix timeout when only waiting"
 			while((EventCount = kevent(E->FD, nullptr, 0, Events, ArrayCount(Events), nullptr)) == -1)
 			{
 				if(errno != EINTR)
@@ -149,8 +181,9 @@ co::execute()
 #elif __linux__
 			epoll_event Events[16];
 			int         EventCount;
-			while((EventCount = epoll_wait(E->FD, Events, ArrayCount(Events), -1)) == -1)
+			while((EventCount = epoll_wait(E->FD, Events, ArrayCount(Events), OnlyWaiting ? -1 : 0)) == -1)
 			{
+				if(errno == EAGAIN) break;
 				if(errno != EINTR)
 				{
 					perror("epoll_wait");
@@ -172,6 +205,7 @@ co::execute()
 			break;
 		}
 	}
+	pthread_mutex_unlock(E->Mutex);
 }
 
 void
@@ -207,9 +241,9 @@ static void
 wait(fd FD, uint32_t Events)
 {
 	assert(E->ExecutingAt);
-	auto Co = E->ExecutingAt;
+	auto        Co = E->ExecutingAt;
 	epoll_event Event;
-	Event.events = Events;
+	Event.events   = Events;
 	Event.data.ptr = Co;
 	epoll_ctl(E->FD, EPOLL_CTL_ADD, FD, &Event);
 	remove(&Co->List);
@@ -259,9 +293,9 @@ co::sleep(timespec const *T)
 	fd FD = timerfd_create(CLOCK_MONOTONIC, 0);
 	if(FD == -1) exit(EX_OSERR);
 	itimerspec IT;
-	IT.it_value = *T;
+	IT.it_value    = *T;
 	IT.it_interval = {};
-	int Result = timerfd_settime(FD, 0, &IT, nullptr);
+	int Result     = timerfd_settime(FD, 0, &IT, nullptr);
 	if(Result == -1) exit(EX_OSERR);
 	wait(FD, EPOLLIN);
 	close(FD);
