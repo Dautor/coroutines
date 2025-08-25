@@ -23,9 +23,11 @@
 typedef int fd;
 
 #pragma clang diagnostic ignored "-Wthread-safety-negative"
+#pragma clang diagnostic ignored "-Winvalid-offsetof"
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wpadded"
+#pragma clang diagnostic ignored "-Wzero-length-array"
 struct routine
 {
 	dlist                 List;
